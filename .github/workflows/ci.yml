@@ -19,6 +19,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest
+      - name: Set PYTHONPATH
+        run: echo "PYTHONPATH=$PYTHONPATH:$(pwd)/src" >> $GITHUB_ENV
       - name: Run unit tests
         run: |
           pytest -q tests || true
@@ -37,6 +39,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install linkml linkml-runtime
+      - name: Set PYTHONPATH
+        run: echo "PYTHONPATH=$PYTHONPATH:$(pwd)/src" >> $GITHUB_ENV
       - name: Create sample XSD
         run: |
           cat > sample.xsd << 'EOF'
