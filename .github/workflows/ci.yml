@@ -17,11 +17,11 @@ jobs:
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          pip install -r ome-nbo-formatter/requirements.txt
+          pip install -r requirements.txt
           pip install pytest
       - name: Run unit tests
         run: |
-          pytest -q ome-nbo-formatter/tests || true
+          pytest -q tests || true
 
   linkml-smoke:
     runs-on: ubuntu-latest
@@ -35,10 +35,10 @@ jobs:
       - name: Install deps + linkml
         run: |
           python -m pip install --upgrade pip
-          pip install -r ome-nbo-formatter/requirements.txt
+          pip install -r requirements.txt
           pip install linkml linkml-runtime
       - name: Generate small schema and json-schema
         run: |
-          python ome-nbo-formatter/src/generator.py ome-nbo-formatter/tests/data/sample.xsd --output out.yaml || true
+          python src/generator.py tests/data/sample.xsd --output out.yaml || true
           linkml generate json-schema out.yaml > out.json || true
 
