@@ -4,7 +4,7 @@ import argparse
 import xmlschema
 import logging
 import re
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple, Any
 from collections import defaultdict
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -30,25 +30,161 @@ def xsd_to_json_schema(xsd_path: str) -> Dict:
         # Parse the XSD file
         schema = xmlschema.XMLSchema(xsd_path)
         
-        # Create a basic JSON Schema structure
+        # Build type registry ($defs)
+        defs: Dict[str, Any] = {}
+
+        def build_type_schema(tdef) -> Dict[str, Any]:
+            # Simple types
+            if hasattr(tdef, 'is_simple') and tdef.is_simple():
+                base_t = getattr(tdef, 'base_type', None)
+                base_name = _local_name(base_t.name) if getattr(base_t, 'name', None) else None
+                sch: Dict[str, Any] = {"type": _map_xsd_type_to_json_type(base_name or _local_name(getattr(tdef, 'name', '') or 'string'))}
+                # Type-level documentation
+                try:
+                    tdoc = _get_documentation(getattr(tdef, 'annotation', None))
+                    if tdoc:
+                        sch["description"] = tdoc
+                except Exception:
+                    pass
+                enums = getattr(tdef, 'enumeration', None)
+                if enums:
+                    sch["enum"] = [str(v) for v in enums]
+                return sch
+            # Complex types
+            obj: Dict[str, Any] = {"type": "object", "properties": {}}
+            # Type-level documentation
+            try:
+                tdoc = _get_documentation(getattr(tdef, 'annotation', None))
+                if tdoc:
+                    obj["description"] = tdoc
+            except Exception:
+                pass
+            required: list = []
+
+            # Inheritance
+            try:
+                if hasattr(tdef, 'content') and getattr(tdef.content, 'base_type', None):
+                    base = tdef.content.base_type
+                    if getattr(base, 'name', None):
+                        bname = _local_name(base.name)
+                        if bname not in defs:
+                            defs[bname] = build_type_schema(base)
+                        # Merge base
+                        bsch = defs[bname]
+                        if isinstance(bsch, dict) and bsch.get('type') == 'object':
+                            obj['properties'].update(bsch.get('properties', {}))
+                            if 'required' in bsch:
+                                required.extend(bsch['required'])
+            except Exception:
+                pass
+
+            # Attributes
+            try:
+                for aname, at in getattr(tdef, 'attributes', {}).items():
+                    an = _local_name(aname)
+                    obj['properties'][f"@{an}"] = _process_attribute(an, at)
+                    if getattr(at, 'use', None) == 'required':
+                        required.append(f"@{an}")
+            except Exception:
+                pass
+
+            # Elements content
+            try:
+                content = getattr(tdef, 'content', None)
+                if content is not None:
+                    model = getattr(content, 'model', None)
+                    if hasattr(content, 'elements') and content.elements:
+                        props: Dict[str, Any] = {}
+                        for cname, celem in content.elements.items():
+                            child_schema, child_required = _element_to_schema(celem)
+                            props[_local_name(cname)] = child_schema
+                            if child_required:
+                                required.append(_local_name(cname))
+                        if model == 'choice':
+                            obj['oneOf'] = [{"type": "object", "properties": {k: v}} for k, v in props.items()]
+                        else:
+                            obj['properties'].update(props)
+            except Exception as e:
+                logger.debug(f"content parse error: {e}")
+
+            if required:
+                obj['required'] = sorted(list(set(required)))
+            return obj
+
+        def _element_to_schema(elem) -> Tuple[Dict[str, Any], bool]:
+            # Resolve ref
+            elem_doc = None
+            try:
+                elem_doc = _get_documentation(getattr(elem, 'annotation', None))
+            except Exception:
+                pass
+            try:
+                if getattr(elem, 'ref', None):
+                    target = schema.elements.get(getattr(elem.ref, 'name', None))
+                    if target is not None:
+                        elem = target
+                        # if no local doc, use target's doc
+                        if not elem_doc:
+                            try:
+                                elem_doc = _get_documentation(getattr(elem, 'annotation', None))
+                            except Exception:
+                                pass
+            except Exception:
+                pass
+            # Determine base schema for the element's type
+            et = getattr(elem, 'type', None)
+            sch: Dict[str, Any]
+            if et is not None and getattr(et, 'name', None):
+                tname = _local_name(et.name)
+                if tname not in defs:
+                    defs[tname] = build_type_schema(et)
+                if elem_doc:
+                    sch = {"allOf": [{"$ref": f"#/$defs/{tname}"}], "description": elem_doc}
+                else:
+                    sch = {"$ref": f"#/$defs/{tname}"}
+            elif et is not None:
+                sch = build_type_schema(et)
+                if elem_doc and isinstance(sch, dict) and 'description' not in sch:
+                    sch['description'] = elem_doc
+            else:
+                sch = {"type": "object"}
+                if elem_doc:
+                    sch['description'] = elem_doc
+
+            mino = getattr(elem, 'min_occurs', None)
+            maxo = getattr(elem, 'max_occurs', None)
+            if maxo == 'unbounded' or (isinstance(maxo, int) and maxo > 1):
+                sch = {"type": "array", "items": sch}
+            return sch, isinstance(mino, int) and mino >= 1
+
+        # Build root schema
         json_schema = {
             "$schema": "http://json-schema.org/draft-07/schema#",
             "type": "object",
             "properties": {},
-            "definitions": {}
+            "$defs": defs
         }
-        
-        # Extract top-level elements
-        for element_name, element_type in schema.elements.items():
+
+        for ename, e in schema.elements.items():
             try:
-                element_name = _local_name(element_name)  # Remove namespace prefix
-                json_schema["properties"][element_name] = _extract_element_content(element_name, element_type, schema, json_schema)
-            except Exception as e:
-                logger.warning(f"Error processing element {element_name}: {str(e)}")
-        
-        # Make the schema JSON serializable
+                name = _local_name(ename)
+                es, _ = _element_to_schema(e)
+                json_schema['properties'][name] = es
+            except Exception as ex:
+                logger.warning(f"Error processing element {ename}: {ex}")
+
+        # identities as comment
+        try:
+            idents = getattr(schema, 'identities', {}) or {}
+            if idents:
+                json_schema.setdefault('$comment', {})
+                json_schema['$comment'] = {
+                    'keys': [str(k) for k in idents.get('keys', {}).keys()] if isinstance(idents, dict) else []
+                }
+        except Exception:
+            pass
+
         json_schema = _make_json_serializable(json_schema)
-        
         return json_schema
     except Exception as e:
         logger.error(f"Error converting XSD to JSON Schema: {str(e)}")
