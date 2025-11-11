@@ -279,8 +279,7 @@ def convert_json_schema_to_linkml(json_schema, xsd, metadata=None):
             
         linkml_schema["classes"][type_name] = {
             "description": f"Complex type {type_name}",
-            "slots": [],
-            "attributes": {}
+            "slots": []
         }
         
         # Get documentation if available
@@ -345,8 +344,7 @@ def convert_json_schema_to_linkml(json_schema, xsd, metadata=None):
         # Create class for element
         linkml_schema["classes"][element_name] = {
             "description": f"The {element_name} element from the XML Schema.",
-            "slots": [],
-            "attributes": {}
+            "slots": []
         }
         
         # Get documentation if available
@@ -380,7 +378,6 @@ def convert_json_schema_to_linkml(json_schema, xsd, metadata=None):
                     linkml_schema["classes"][head_name] = {
                         "description": f"Head of substitution group {head_name}",
                         "slots": [],
-                        "attributes": {},
                         "abstract": True
                     }
                 linkml_schema["classes"][element_name]["is_a"] = head_name
@@ -401,10 +398,7 @@ def convert_json_schema_to_linkml(json_schema, xsd, metadata=None):
                         base_slots = linkml_schema["classes"][base_name].get("slots", [])
                         linkml_schema["classes"][element_name]["slots"].extend(base_slots)
                         
-                        # Inherit attributes from base class
-                        base_attrs = linkml_schema["classes"][base_name].get("attributes", {})
-                        for attr_name, attr_slot in base_attrs.items():
-                            linkml_schema["classes"][element_name]["attributes"][attr_name] = attr_slot
+                        # No per-class attributes map in LinkML; rely on slots/slot_usage
 
         # Add child element slots (content model)
         try:
@@ -483,10 +477,9 @@ def convert_json_schema_to_linkml(json_schema, xsd, metadata=None):
                     if "required" in prop_def and attr_name in prop_def["required"]:
                         linkml_schema["slots"][slot_name]["required"] = True
                 
-                # Add slot to class and track in attributes mapping
+                # Add slot to class
                 if slot_name not in linkml_schema["classes"][prop_name]["slots"]:
                     linkml_schema["classes"][prop_name]["slots"].append(slot_name)
-                linkml_schema["classes"][prop_name]["attributes"][attr_name] = slot_name
     
     # No additional hardcoded base classes; rely solely on parsed XSD content
     
