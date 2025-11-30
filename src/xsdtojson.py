@@ -155,7 +155,65 @@ def xsd_to_json_schema(xsd_path: str) -> Dict:
             maxo = getattr(elem, 'max_occurs', None)
             if maxo == 'unbounded' or (isinstance(maxo, int) and maxo > 1):
                 sch = {"type": "array", "items": sch}
+            # Fallback DOM crawl: add child xs:element under this element's complexType
+            try:
+                ename = getattr(elem, 'name', None)
+                if ename and isinstance(sch, dict):
+                    dom_props, dom_required = _dom_child_elements(schema, _local_name(ename), defs)
+                    if dom_props:
+                        # If sch is a $ref wrapper, expand to object with allOf
+                        if '$ref' in sch or 'allOf' in sch:
+                            sch = {"allOf": [sch], "type": "object", "properties": dom_props}
+                        else:
+                            sch.setdefault("type", "object")
+                            sch.setdefault("properties", {})
+                            sch["properties"].update(dom_props)
+                        if dom_required:
+                            if "required" in sch and isinstance(sch["required"], list):
+                                sch["required"].extend([r for r in dom_required if r not in sch["required"]])
+                            else:
+                                sch["required"] = dom_required
+            except Exception as e:
+                logger.debug(f"DOM crawl failed for element {_local_name(getattr(elem,'name',None))}: {e}")
             return sch, isinstance(mino, int) and mino >= 1
+
+        def _dom_child_elements(schema_obj: xmlschema.XMLSchema, element_local_name: str, defs_dict: Dict[str, Any]) -> Tuple[Dict[str, Any], list]:
+            """
+            Fallback: use raw XML DOM to find nested xs:element children of a named element.
+            """
+            props: Dict[str, Any] = {}
+            required: list = []
+            try:
+                root = getattr(schema_obj, 'root', None)
+                if root is None:
+                    return props, required
+                ns = {'xs': 'http://www.w3.org/2001/XMLSchema'}
+                for el in root.findall(f".//xs:element[@name='{element_local_name}']", ns):
+                    # Under this element's complexType, collect nested xs:element
+                    for sub in el.findall(".//xs:complexType//xs:element", ns):
+                        ref = sub.get('ref')
+                        name = sub.get('name')
+                        child = name or (ref.split(':', 1)[-1] if ref else None)
+                        if not child:
+                            continue
+                        # Determine multiplicity
+                        mino = sub.get('minOccurs')
+                        maxo = sub.get('maxOccurs')
+                        is_req = mino and mino.isdigit() and int(mino) >= 1
+                        # Determine range: prefer $defs if present
+                        rng_schema: Dict[str, Any] = {}
+                        if child in defs_dict:
+                            rng_schema = {"$ref": f"#/$defs/{child}"}
+                        else:
+                            rng_schema = {"type": "object"}
+                        if maxo == 'unbounded' or (maxo and maxo.isdigit() and int(maxo) > 1):
+                            rng_schema = {"type": "array", "items": rng_schema}
+                        props[child] = rng_schema
+                        if is_req:
+                            required.append(child)
+            except Exception:
+                pass
+            return props, required
 
         # Build root schema
         json_schema = {
