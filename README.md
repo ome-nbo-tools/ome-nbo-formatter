@@ -11,12 +11,51 @@ Convert arbitrary XML Schema (XSD) into LinkML YAML. The pipeline preserves elem
 - Enums from XSD enumerations (where present)
 - Identifier slots from XSD ID/IDREF/IDREFS heuristics
 
-## Install
-- Python 3.8+
-- `pip install -r requirements.txt`
+## Installation
 
-Optional (for downstream checks):
-- `pip install linkml linkml-runtime`
+### Prerequisites
+- Python 3.8 or higher
+- Git
+
+### Setup
+
+1. **Clone the repository**
+```bash
+git clone <repository-url>
+cd ome-nbo-formatter
+```
+
+2. **Create virtual environment**
+```bash
+python -m venv venv
+```
+
+3. **Activate virtual environment**
+
+**Linux/macOS:**
+```bash
+source venv/bin/activate
+```
+
+**Windows:**
+```bash
+venv\Scripts\activate
+```
+
+4. **Install dependencies**
+```bash
+pip install -r requirements.txt
+```
+
+5. **Verify installation**
+```bash
+python src/generator.py --help
+```
+
+### Deactivate virtual environment
+```bash
+deactivate
+```
 
 ## Fetch NBO sources on demand
 Fetch only required parts of the public NBO repo using git sparse checkout.

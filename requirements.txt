@@ -1,12 +1,8 @@
 xmlschema>=2.4,<3
 PyYAML>=6
+linkml>=1.5.0
 linkml-runtime>=1.7
 xsdata>=24.0
 pandas
 openpyxl
-pyyaml
-requests
-xsdata
-linkml-runtime
-xmlschema
-linkml>=1.5.0 
+requests 
