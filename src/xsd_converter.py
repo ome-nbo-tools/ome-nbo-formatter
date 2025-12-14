@@ -298,6 +298,21 @@ class LinkMLConverter:
                     attrs.pop(attr_name, None)
     
     def _cleanup_schema(self):
+        subsets = self.linkml_schema.get("subsets") or {}
+        used_subsets = set()
+        for cls in (self.linkml_schema.get("classes") or {}).values():
+            for s in cls.get("in_subset", []) or []:
+                used_subsets.add(s)
+            for attr in (cls.get("attributes") or {}).values():
+                for s in attr.get("in_subset", []) or []:
+                    used_subsets.add(s)
+        for s in sorted(used_subsets):
+            if s not in subsets:
+                subsets[s] = {"description": s}
+        if subsets:
+            self.linkml_schema["subsets"] = subsets
+        else:
+            self.linkml_schema.pop("subsets", None)
         if "enums" in self.linkml_schema and not self.linkml_schema["enums"]:
             del self.linkml_schema["enums"]
         if not self.linkml_schema.get("slots"):

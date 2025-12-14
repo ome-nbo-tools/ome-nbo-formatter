@@ -1,5 +1,6 @@
 from typing import Dict, List, Optional
 from collections import defaultdict
+import re
 
 try:
     from .utils import extract_text, local_name
@@ -59,6 +60,20 @@ def apply_metadata_to_target(target: Dict, metadata: Dict[str, List[str]]):
                 if subset_name and subset_name not in subset_list:
                     subset_list.append(subset_name)
     
+    subset_values: List[str] = []
+    for key in list(metadata.keys()):
+        if key.lower() in {"domain", "category", "extension"}:
+            subset_values.extend([f"{key}_{v}" for v in (metadata.pop(key) or [])])
+    
+    if subset_values:
+        subset_list = target.setdefault("in_subset", [])
+        for raw_value in subset_values:
+            if not raw_value:
+                continue
+            normalized = re.sub(r"[^A-Za-z0-9_]+", "_", raw_value.replace(" ", "_")).strip("_")
+            if normalized and normalized not in subset_list:
+                subset_list.append(normalized)
+    
     if not metadata:
         return
     
@@ -67,12 +82,20 @@ def apply_metadata_to_target(target: Dict, metadata: Dict[str, List[str]]):
         if not values:
             continue
         ann_base = key.replace(" ", "_")
-        for idx, value in enumerate(values):
-            ann_key = ann_base if idx == 0 and ann_base not in annotations else f"{ann_base}_{idx}"
-            annotations[ann_key] = {
-                "tag": key,
-                "value": value
-            }
+        cleaned = [v for v in (val.strip() for val in values) if v]
+        deduped: List[str] = []
+        seen = set()
+        for v in cleaned:
+            if v in seen:
+                continue
+            seen.add(v)
+            deduped.append(v)
+        if not deduped:
+            continue
+        if len(deduped) == 1:
+            annotations[ann_base] = deduped[0]
+        else:
+            annotations[ann_base] = deduped
 
 
 def record_appinfo_entry(target: Dict, node):
@@ -82,11 +105,20 @@ def record_appinfo_entry(target: Dict, node):
     name = local_name(node.tag)
     value = (node.text or "").strip() or "true"
     annotations = target.setdefault("annotations", {})
-    key = name if name not in annotations else f"{name}_{len(annotations)}"
-    annotations[key] = {
-        "tag": name,
-        "value": value
-    }
+    existing = annotations.get(name)
+    if existing is None:
+        annotations[name] = value
+        return
+    if isinstance(existing, list):
+        if value not in existing:
+            existing.append(value)
+        return
+    if isinstance(existing, str):
+        if existing == value:
+            return
+        annotations[name] = [existing, value]
+        return
+    annotations[name] = value
 
 
 def apply_appinfo_metadata(target: Dict, annotation):
@@ -174,6 +206,14 @@ def get_documentation(annotation) -> Optional[str]:
         except Exception:
             pass
     
-    merged = "\n".join([t for t in texts if t])
+    ordered: List[str] = []
+    seen = set()
+    for t in texts:
+        s = (t or "").strip()
+        if not s or s in seen:
+            continue
+        seen.add(s)
+        ordered.append(s)
+    merged = "\n".join(ordered)
     return merged or None
 
